@@ -1,0 +1,29 @@
+// src/tm_gen.c
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "satellite_types.h"
+#include "task_defs.h"
+#include <stdio.h>
+
+
+extern QueueHandle_t xTelemetryQueue;
+
+
+void vTelemetryGeneratorTask(void *pvParameters) {
+    
+    HK_Telemetry_t tx_packet;
+
+    printf("TM Generator Task initialized and running.\n");
+    for(;;) {
+        
+        tx_packet.timestamp = xTaskGetTickCount();
+        tx_packet.bus_voltage = 3.3f;
+        
+        if(xQueueSend(xTelemetryQueue, &tx_packet, 0) != pdPASS) {
+            printf("WARNING: Telemetry Queue Full, packet lost.\n");
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(1000)); 
+    }
+}
