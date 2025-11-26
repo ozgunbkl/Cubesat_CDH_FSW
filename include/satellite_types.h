@@ -52,4 +52,26 @@ typedef struct {
     uint8_t fault_code;         // 8 bits: Detailed fault identifier (0x00=OK, 0x01=UVLO)
 } EPS_Status_t;
 
+// --- IV. Enumeration of Telecommand IDs ---
+typedef enum {
+    TC_NO_OP,        // Command for testing connectivity (no operation)
+    TC_SET_MODE,     // Command to change the system mode
+    TC_REQUEST_HK    // Command to request immediate Housekeeping Telemetry
+} TelecommandID_t;
+
+// --- V. Telecommand Packet Structure ---
+typedef struct {
+    uint32_t timestamp; 
+    TelecommandID_t command_id;
+    uint8_t payload[8]; // Simple payload for command arguments (e.g., the new mode value)
+    uint16_t crc;       // CRC-16 for integrity
+} TelecommandPacket_t;
+
+typedef enum {
+    WDT_TASK_TM_GEN,
+    WDT_TASK_CMD_PROC,
+    WDT_TASK_EPS_MON,
+    WDT_TASK_COUNT
+} WatchdogTaskID_t;
+
 #endif // SATELLITE_TYPES_H
