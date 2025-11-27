@@ -5,12 +5,14 @@
 #include "freertos/queue.h"
 #include "satellite_types.h"
 #include "state_manager.h"
+#include "watchdog.h"
 #include <stdio.h>
 #include <stdint.h>
 #include "tc_proc.h"
+#include "utils.h"
 #include "esp_log.h"
 
-extern void watchdog_pet(WatchdogTaskID_t task_id);
+
 void process_telecommand(TelecommandPacket_t *tc_packet);
 
 extern QueueHandle_t xTelemetryQueue;
@@ -39,7 +41,16 @@ void vCommandProcessorTask(void *pvParameters){
 
 
 void process_telecommand(TelecommandPacket_t *tc_packet) {
-    printf("TC PROC: Executing Command ID: %d\n", tc_packet->command_id);
+    size_t crc_data_length = sizeof(TelecommandPacket_t) - sizeof(uint16_t);
+
+    uint16_t calculated_crc = crc16_ccitt((const uint8_t *)tc_packet, crc_data_length);
+
+    if(calculated_crc != tc_packet->crc) {
+        printf("TC PROC: ERROR! CRC FAILURE! Packet discarded.\n");
+        printf("           Expected CRC: 0x%X, Calculated CRC: 0x%X\n", tc_packet->crc, calculated_crc);
+        return;
+    }
+    printf("TC PROC: CRC OK. Executing Command ID: %d\n", tc_packet->command_id);
 
     switch (tc_packet->command_id) {
         case TC_SET_MODE:

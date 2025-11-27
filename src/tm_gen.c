@@ -5,9 +5,9 @@
 #include "satellite_types.h"
 #include "task_defs.h"
 #include "state_manager.h"
+#include "watchdog.h"
 #include <stdio.h>
 
-extern void watchdog_pet(WatchdogTaskID_t task_id);
 extern QueueHandle_t xTelemetryQueue;
 
 

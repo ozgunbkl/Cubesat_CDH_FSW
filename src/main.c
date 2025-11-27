@@ -9,9 +9,10 @@
 #include "tc_proc.h"
 #include "eps_control.h"
 #include "task_defs.h"
+#include "watchdog.h"
 
-void vSoftwareWatchdogTask(void *pvParameters);
 void vCommandInjectionTask(void *pvParameters);
+void vDataLoggerTask(void *pvParameters);
 
 SystemMode_t g_current_mode = MODE_SAFE;
 SemaphoreHandle_t xModeMutex;
@@ -45,6 +46,7 @@ void app_main(void) {
     xTaskCreate(vEPSMonitoringTask, "EPS_MON", 2048, NULL, 4, NULL); 
     xTaskCreate(vTelemetryGeneratorTask, "TM_GEN", 2048, NULL, 3, NULL);
     xTaskCreate(vCommandInjectionTask, "CMD_INJECT", 2048, NULL, 1, NULL);
+    xTaskCreate(vDataLoggerTask, "DATA_LOG", 2048, NULL, 4, NULL);
     
     printf("All tasks and communication channels launched. System running.\n");
 }

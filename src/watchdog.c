@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "satellite_types.h"
+#include "watchdog.h"
 #include <stdio.h>
 
 // Array to store the last time (in ticks) each critical task checked in.

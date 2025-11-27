@@ -71,7 +71,13 @@ typedef enum {
     WDT_TASK_TM_GEN,
     WDT_TASK_CMD_PROC,
     WDT_TASK_EPS_MON,
+    WDT_TASK_DATA_LOG,
     WDT_TASK_COUNT
 } WatchdogTaskID_t;
+
+typedef enum{
+    DOWNLINK_INACTIVE,
+    DOWNLINK_ACTIVE
+} DownlinkMode_t;
 
 #endif // SATELLITE_TYPES_H
