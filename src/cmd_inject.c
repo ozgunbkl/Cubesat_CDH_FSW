@@ -11,50 +11,56 @@
 extern QueueHandle_t xCommandQueue;
 extern DownlinkMode_t g_downlink_mode;
 
+// Helper to simulate a Ground Station "Packing" a CCSDS packet
+void Inject_CCSDS_Command(uint16_t apid, uint8_t cmd_id, uint8_t param) {
+    TelecommandPacket_t tx_packet;
+    memset(&tx_packet, 0, sizeof(TelecommandPacket_t));
+
+    // 1. Manually construct the raw buffer
+    // Bytes 0-1: APID (Simplified CCSDS Header simulation)
+    tx_packet.raw_data[0] = (uint8_t)(apid >> 8);
+    tx_packet.raw_data[1] = (uint8_t)(apid & 0xFF);
+    
+    // Bytes 2-13: Rest of CCSDS Header (Sequence, Time, etc. - simplified for now)
+    // Byte 14: Command ID (Our internal TC_ID)
+    tx_packet.raw_data[14] = cmd_id;
+    // Byte 15: Parameter (e.g., the new Mode)
+    tx_packet.raw_data[15] = param;
+
+    // 2. Set the length (Header 14 bytes + Data 2 bytes + CRC 2 bytes)
+    tx_packet.length = 18;
+
+    // 3. Calculate CRC over the raw data (excluding the 2-byte CRC field at the end)
+    tx_packet.packet_crc = crc16_ccitt(tx_packet.raw_data, tx_packet.length - 2);
+
+    // 4. Place the CRC at the end of the raw buffer (Professional standard)
+    tx_packet.raw_data[16] = (uint8_t)(tx_packet.packet_crc >> 8);
+    tx_packet.raw_data[17] = (uint8_t)(tx_packet.packet_crc & 0xFF);
+
+    printf("INJECTOR: Sending APID 0x%03X, CMD %d, CRC 0x%04X\n", apid, cmd_id, tx_packet.packet_crc);
+    
+    xQueueSend(xCommandQueue, &tx_packet, pdMS_TO_TICKS(100));
+}
+
 void vCommandInjectionTask(void *pvParameters) {
-    TelecommandPacket_t tx_command;
-
-    size_t crc_data_length = sizeof(TelecommandPacket_t) - sizeof(uint16_t);
-
-    // 1. Wait 5 seconds after boot to ensure all system tasks are initialized
+    // Wait for system boot
     vTaskDelay(pdMS_TO_TICKS(5000));
 
-    // --- TEST 1: Send Command to Switch Mode to NOMINAL (After initial 5s delay) ---
-    memset(&tx_command, 0, sizeof(TelecommandPacket_t));
-    tx_command.timestamp = xTaskGetTickCount();
-    tx_command.command_id = TC_SET_MODE;
-    
-    // Payload: Send the new mode (MODE_NOMINAL = 1) in the first byte
-    tx_command.payload[0] = MODE_NOMINAL; 
+    // --- TEST 1: Change Mode to NOMINAL ---
+    // APID_CDHS (usually 0x01 in our router), CMD_SET_MODE, Param: MODE_NOMINAL
+    Inject_CCSDS_Command(0x01, TC_SET_MODE, MODE_NOMINAL);
 
-    tx_command.crc = crc16_ccitt((const uint8_t *)&tx_command, crc_data_length);
+    vTaskDelay(pdMS_TO_TICKS(10000));
 
-    printf("INJECTOR: Sending TC_SET_MODE to NOMINAL (Payload: %d, CRC: 0x%X)\n", tx_command.payload[0], tx_command.crc);
+    // --- TEST 2: Send EPS Command (Heater Control) ---
+    // APID_EPS (usually 0x02), CMD_ID (EPS_CMD_HEATER_CTRL = 1), Param: 1 (ON)
+    Inject_CCSDS_Command(0x02, 1, 1);
 
-    // Send the packet to the Command Queue (Wait 100ms max)
-    if (xQueueSend(xCommandQueue, &tx_command, pdMS_TO_TICKS(100)) != pdPASS) {
-        printf("INJECTOR: ERROR! Command Queue full or unavailable.\n");
-    }
+    vTaskDelay(pdMS_TO_TICKS(10000));
 
-    // 2. Wait another 15 seconds to simulate ground station delay
-    vTaskDelay(pdMS_TO_TICKS(15000)); 
+    // --- TEST 3: Ground Station Pass ---
+    g_downlink_mode = DOWNLINK_ACTIVE;
+    printf("INJECTOR: Ground Station Pass Detected!\n");
 
-    memset(&tx_command, 0, sizeof(TelecommandPacket_t));
-    // --- TEST 2: Send NO-OP Command later to test connectivity ---
-    tx_command.timestamp = xTaskGetTickCount();
-    tx_command.command_id = TC_NO_OP;
-
-    tx_command.crc = crc16_ccitt((const uint8_t *)&tx_command, crc_data_length);
-    
-    printf("INJECTOR: Sending TC_NO-OP command (CRC: 0x%X).\n", tx_command.crc);
-    xQueueSend(xCommandQueue, &tx_command, pdMS_TO_TICKS(100));
-
-    // --- TEST 3: Trigger the Downlink Window (After 20s) ---
-    vTaskDelay(pdMS_TO_TICKS(5000)); // Wait another 5 seconds
-
-    g_downlink_mode = DOWNLINK_ACTIVE; // <<< Simulate entering Ground Station visibility
-    printf("INJECTOR: Ground Station Pass Detected! Setting Downlink ACTIVE.\n");
-
-    // The task has completed its simulation job and self-suspends
     vTaskDelete(NULL); 
 }

@@ -4,6 +4,8 @@
 #include "satellite_types.h"
 #include "state_manager.h"
 #include "watchdog.h"
+#include "archive_service.h" 
+#include "payload_service.h"
 #include <stdio.h>
 
 extern QueueHandle_t xTelemetryQueue;
@@ -13,47 +15,54 @@ void vDataLoggerTask(void *pvParameters){
     HK_Telemetry_t rx_log_packet;
     const TickType_t xLogWaitTime = pdMS_TO_TICKS(100);
 
+    Archive_Init(); // Initialize the archive system
+
     printf("DATA LOGGER: Task initialized, monitoring telemetry queue.\n");
 
-    for(;;){
-        // Attempt to retrieve a packet from the Telemetry Queue
+    for(;;) {
+        // --- STEP A: REAL ARCHIVING ---
+        // Replace your placeholder printf with a real write operation
         if (xQueueReceive(xTelemetryQueue, &rx_log_packet, xLogWaitTime) == pdPASS) {
             
-            // --- DATA RETRIEVED: SIMULATE WRITING TO FLASH/SD CARD ---
-            // The FSW is now guaranteed safe access to this data.
-
-            printf("DATA LOGGER: SUCCESS! Archived packet T: %lu | V: %.2f V\n",
-                   rx_log_packet.timestamp, 
-                   (double)rx_log_packet.bus_voltage);
+            ArchiveStatus_t write_status = Archive_WriteRecord(REC_ID_HK, (uint8_t*)&rx_log_packet, sizeof(HK_Telemetry_t));
             
-            // Placeholder: In a real system, SPIFFS or FATFS write functions 
-            // would be called here to save the data persistently.
-        
-        } else {
-            // Log queue status (optional, for debug)
-            // printf("DATA LOGGER: Queue empty, sleeping...\n");
+            if (write_status == ARCHIVE_OK) {
+                // Optional: low-frequency debug log
+                // printf("DATA LOGGER: Record saved at T: %lu\n", rx_log_packet.timestamp);
+            } else {
+                // Archive_WriteRecord already reported the fault to FDIR, 
+                // Just print here for your local debug.
+                printf("DATA LOGGER: Archiving failed! Error: %d\n", write_status);
+            }
         }
 
-        // --- DOWNLINK STRATEGY: RETRIEVE ARCHIVED DATA ---
-        // Downlink only happens if we are over a ground station AND in the correct FSW mode
-
+        // --- STEP B: REAL DOWNLINK RETRIEVAL ---
+        // Instead of a simple loop, pull real data from your simulated flash
         if (g_downlink_mode == DOWNLINK_ACTIVE && get_system_mode() == MODE_NOMINAL) {
-            // Placeholder: Retrieve data from simulated archive (e.g., SD card)
-            // For simplicity, I just print a burst signal.
             printf("DATA LOGGER: --- DOWNLINK BURST ACTIVE --- \n");
-        
+            
+            ArchiveRecord_t out_record;
+            for (uint16_t i = 0; i < 5; i++) {
+                // Use your ReadRecord logic (which includes the CRC check!)
+                ArchiveStatus_t read_status = Archive_ReadRecord(i, &out_record);
 
-            for(int i = 0; i<5 ;i++){
-                // In a real system, retrieve archived_packet[i] and send via radio queue.
-                printf("DATA LOGGER: Sending Archived Packet %d... \n", i + 1);
+                if (read_status == ARCHIVE_OK) {
+                    printf("DATA LOGGER: Sending Archived Packet %d [ID: 0x%02X, CRC: 0x%04X]\n", 
+                            i + 1, out_record.record_id, out_record.crc);
+                    // Next step would be pushing 'out_record' to a Radio/Comms Queue
+                } else {
+                    printf("DATA LOGGER: Read error at index %d (Status: %d)\n", i, read_status);
+                }
             }
-            printf("DATA LOGGER: --- DOWNLINK COMPLETE. Resuming Archiving. ---\n");
-
-            // After downlink, signal the window is closed
+            
+            printf("DATA LOGGER: --- DOWNLINK COMPLETE. ---\n");
             g_downlink_mode = DOWNLINK_INACTIVE;
         }
 
+        // --- STEP C: PERIODIC SCIENCE LOGGING ---
+        // Ensure Payload runs so it can call Archive_WriteRecord for science data
+        Payload_Update();
+
         watchdog_pet(WDT_TASK_DATA_LOG);
-        // The xLogWaitTime timeout acts as the task's VTaskDelay
     }
 }

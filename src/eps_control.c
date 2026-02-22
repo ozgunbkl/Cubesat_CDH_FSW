@@ -4,41 +4,45 @@
 #include "eps_control.h"
 #include "state_manager.h"
 #include "watchdog.h"
+#include "eps_telemetry.h"
+#include "eps_commands.h"
+#include "fdir_service.h"
 #include <stdio.h>
 
 #define CRITICAL_BUS_VOLTAGE 2.5f
 
 void vEPSMonitoringTask(void *pvParameters) {
-    
-    float current_bus_voltage = 3.2f;
+    printf("CDH EPS Monitor: Now linked to EPS Subsystem Telemetry.\n");
 
-    printf("EPS Monitoring Task initialized and running.\n");
     for(;;) {
-        
-        // 1. Simulate Reading Voltage
-        // NOTE: We'll intentionally simulate a fault after 20 seconds.
-        if(xTaskGetTickCount() > pdMS_TO_TICKS(20000)) {
-            current_bus_voltage = 2.4f; // Injecting a simulated fault
-        }
-        // 2. FDIR (Fault Detection and Isolation) Logic
+        // 1. GET REAL DATA from the EPS Subsystem (not a local variable)
+        if(xSemaphoreTake(xEPSDataMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            float real_voltage = g_eps_telemetry.f_BusVoltage;
+            xSemaphoreGive(xEPSDataMutex);
 
-        if(current_bus_voltage < CRITICAL_BUS_VOLTAGE && get_system_mode() != MODE_CRITICAL){
-            printf("EPS MON: !!! CRITICAL FAULT DETECTED (V: %.2f V) !!!\n", current_bus_voltage);
-            
-            // 3. Recovery Action (Highest Authority)
-            // Force FSW into the safest state using the protected function
-            set_system_mode(MODE_CRITICAL);
-            
-            printf("EPS MON: FDIR complete. System forced into MODE_CRITICAL.\n");   
+            // 2. GLOBAL FDIR LOGIC
+            // If the EPS Subsystem is struggling, CDH triggers the Global Critical Mode
+            if(real_voltage < CRITICAL_BUS_VOLTAGE && get_system_mode() != MODE_CRITICAL) {
+                
+                // --- NEW: REPORT TO THE SYSTEM-WIDE LOG ---
+                FaultReport_t global_pwr_fault = {
+                    .source = SRC_EPS,
+                    .severity = FAULT_CRITICAL,
+                    .fault_code = FAULT_EPS_LOW_VOLTAGE,
+                    .timestamp = Time_GetSeconds()
+                };
+                FDIR_ReportFault(global_pwr_fault);
+
+                // 3. GLOBAL RECOVERY
+                set_system_mode(MODE_CRITICAL);
+                printf("CDH: Emergency! Satellite forced to MODE_CRITICAL.\n");
+            }
         }
-        else {
-            // Nominal operation
-            // printf("EPS MON: Voltage nominal (%.2f V).\n", current_bus_voltage);
-        }
-        
+
         watchdog_pet(WDT_TASK_EPS_MON);
         
-        vTaskDelay(pdMS_TO_TICKS(10000)); // Check every 10 seconds
+        // Check once per second (10s was way too slow for safety!)
+        vTaskDelay(pdMS_TO_TICKS(1000)); 
     }
 }
 

@@ -11,68 +11,43 @@
 #include "tc_proc.h"
 #include "utils.h"
 #include "esp_log.h"
+#include "cdhs_router.h"
 
-
-void process_telecommand(TelecommandPacket_t *tc_packet);
-
-extern QueueHandle_t xTelemetryQueue;
 extern QueueHandle_t xCommandQueue;
 
-void vCommandProcessorTask(void *pvParameters){
-    HK_Telemetry_t rx_packet;
+/**
+ * @brief The Command Processor Task
+ * It pulls raw CCSDS packets from the queue, verifies them, and routes them.
+ */
+void vCommandProcessorTask(void *pvParameters) {
     TelecommandPacket_t rx_command;
-    printf("TC Processor Task initialized and waiting for commands.\n");
+    
+    printf("TC PROC: Task initialized. Standard: CCSDS Space Packet Protocol.\n");
+
     for(;;) {
+        // Wait for ground commands from the injection task or radio driver
         if(xQueueReceive(xCommandQueue, &rx_command, pdMS_TO_TICKS(100)) == pdPASS) {
-            process_telecommand(&rx_command);
+            
+            // 1. INTEGRITY CHECK (Layer 2)
+            // We calculate CRC over the raw_data buffer excluding the last 2 bytes (the CRC itself)
+            uint16_t calculated_crc = crc16_ccitt(rx_command.raw_data, rx_command.length - 2);
+
+            if(calculated_crc == rx_command.packet_crc) {
+                printf("TC PROC: [CRC OK] Packet Length: %d bytes. Handing to Router...\n", rx_command.length);
+                
+                // 2. ROUTING (Layer 3)
+                // We pass the raw buffer to the CDHS Router
+                CDHS_RoutePacket(rx_command.raw_data, rx_command.length);
+                
+            } else {
+                printf("TC PROC: [CRC ERROR] Dropping packet. Expected: 0x%04X, Computed: 0x%04X\n", 
+                        rx_command.packet_crc, calculated_crc);
+                
+                // Optional: Notify FDIR of a communication link error
+            }
         }
         
-        
-        //if(xQueueReceive(xTelemetryQueue, &rx_packet, 0) == pdPASS) {
-            //printf("Received Telemetry Packet - Timestamp: %lu, Bus Voltage: %.2f V\n",
-            //    rx_packet.timestamp, (double)rx_packet.bus_voltage);
-        //}
-        //if (xTaskGetTickCount() > pdMS_TO_TICKS(10000) && get_system_mode() == MODE_SAFE) {
-        //    set_system_mode(MODE_NOMINAL); // This calls the protected function!
-        //}
+        // Keep the watchdog happy
         watchdog_pet(WDT_TASK_CMD_PROC);
     }
-}
-
-
-void process_telecommand(TelecommandPacket_t *tc_packet) {
-    size_t crc_data_length = sizeof(TelecommandPacket_t) - sizeof(uint16_t);
-
-    uint16_t calculated_crc = crc16_ccitt((const uint8_t *)tc_packet, crc_data_length);
-
-    if(calculated_crc != tc_packet->crc) {
-        printf("TC PROC: ERROR! CRC FAILURE! Packet discarded.\n");
-        printf("           Expected CRC: 0x%X, Calculated CRC: 0x%X\n", tc_packet->crc, calculated_crc);
-        return;
-    }
-    printf("TC PROC: CRC OK. Executing Command ID: %d\n", tc_packet->command_id);
-
-    switch (tc_packet->command_id) {
-        case TC_SET_MODE:
-            // The new mode is expected to be in the first byte of the payload
-            SystemMode_t new_mode = (SystemMode_t)tc_packet->payload[0];
-            set_system_mode(new_mode);
-            break;
-
-        case TC_REQUEST_HK:
-            printf("TC PROC: Requesting immediate Telemetry burst.\n");
-            break;
-            
-        case TC_NO_OP:
-            printf("TC PROC: NO-OP command received. Link OK.\n");
-            break;
-
-        default:
-            printf("TC PROC: ERROR! Unknown command ID: %d\n", tc_packet->command_id);
-            break;
-    }
-}
-
-void vTC_SetSystemMode(int new_mode){
-    printf("STUB CALLED: Setting system mode to %d.\n", new_mode);
 }
